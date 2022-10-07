@@ -5,6 +5,7 @@ import Data.Fin
 import Data.Fin.Extra
 import Data.Nat
 import Data.Nat.Equational
+import Data.DPair
 
 %default total
 
@@ -350,10 +351,22 @@ notLteAndGt Z _ _ aGtB = succNotLTEzero aGtB
 notLteAndGt (S _) Z aLteB _ = succNotLTEzero aLteB
 notLteAndGt (S k) (S j) aLteB aGtB = notLteAndGt k j (fromLteSucc aLteB) (fromLteSucc aGtB)
 
+gcdPart1 : GCD f a b -> CommonFactor f a b
+gcdPart1 (MkGCD cf _) = cf
+
+gcdPart2 : GCD f a b -> ((q : Nat) -> CommonFactor q a b -> Factor q f)
+gcdPart2 (MkGCD _ prf) = prf
+
+commonFactorPart2 : CommonFactor p a b -> Factor p a
+commonFactorPart2 (CommonFactorExists _ x _) = x
+
+commonFactorPart3 : CommonFactor p a b -> Factor p b
+commonFactorPart3 (CommonFactorExists _ _ y) = y
+
 gcd_step : (x : Search) ->
            (rec : (y : Search) -> Smaller y x ->
-                  (f : Nat ** GCD f (left y) (right y))) ->
-           (f : Nat ** GCD f (left x) (right x))
+                  Subset Nat (\f => GCD f (left y) (right y))) ->
+           Subset Nat (\f => GCD f (left x) (right x))
 gcd_step (SearchArgs Z _ bLteA {bNonZero}) _ = absurd . succNotLTEzero $ transitive bNonZero bLteA
 gcd_step (SearchArgs _ Z _ {bNonZero}) _ = absurd $ succNotLTEzero bNonZero
 gcd_step (SearchArgs (S a) (S b) bLteA) rec =
@@ -365,8 +378,8 @@ gcd_step (SearchArgs (S a) (S b) bLteA) rec =
                 replace {p = \x => S a = x} (plusZeroRightNeutral (q * S b)) $ sym prf
             skDividesA = CofactorExists q sbIsFactor
         in
-        (S b ** MkGCD (CommonFactorExists (S b) skDividesA reflexive)
-                      (\q', (CommonFactorExists q' _ qfb) => qfb))
+        Element (S b) $ MkGCD (CommonFactorExists (S b) skDividesA reflexive)
+                              (\q', (CommonFactorExists q' _ qfb) => qfb)
 
     Fraction (S a) (S b) q (FS r) prf =>
             let rLtSb = lteSuccRight $ elemSmallerThanBound r
@@ -374,17 +387,22 @@ gcd_step (SearchArgs (S a) (S b) bLteA) rec =
                     Z => absurd . notLteAndGt (S $ finToNat r) b (elemSmallerThanBound r) $
                         replace {p = LTE (S b)} (sym prf) bLteA
                     (S k) => LTESucc LTEZero
-                (f ** MkGCD (CommonFactorExists f prfSb prfRem) greatestSbSr) =
+                Element f gcdPrf =
                     rec (SearchArgs (S b) (S $ finToNat r) rLtSb) $
                       rewrite plusCommutative a (S b) in
                         LTESucc . LTESucc . plusLteLeft b . fromLteSucc $
                           transitive (elemSmallerThanBound $ FS r) bLteA
 
-                prfSa =
+                0 commonFactor = gcdPart1 gcdPrf
+                0 prfSb = commonFactorPart2 commonFactor
+                0 prfRem = commonFactorPart3 commonFactor
+                0 greatestSbSr = gcdPart2 gcdPrf
+
+                0 prfSa =
                     rewrite sym prf in
                     rewrite multCommutative q (S b) in
                     plusFactor (multNAlsoFactor prfSb q) prfRem
-                greatest = the
+                0 greatest = the
                     ((q' : Nat) -> CommonFactor q' (S a) (S b) -> Factor q' f)
                     (\q', (CommonFactorExists q' qfa qfb) =>
                         let sbfqSb =
@@ -397,21 +415,21 @@ gcd_step (SearchArgs (S a) (S b) bLteA) rec =
                         greatestSbSr q' (CommonFactorExists q' qfb rightPrf)
                     )
             in
-            (f ** MkGCD (CommonFactorExists f prfSa prfSb) greatest)
+            Element f (MkGCD (CommonFactorExists f prfSa prfSb) greatest)
 
 ||| An implementation of Euclidean Algorithm for computing greatest common
 ||| divisors. It is proven correct and total; returns a proof that computed
 ||| number actually IS the GCD. Unfortunately it's very slow, so improvements
 ||| in terms of efficiency would be welcome.
 export
-gcd : (a, b : Nat) -> {auto ok : NotBothZero a b} -> (f : Nat ** GCD f a b)
+gcd : (a, b : Nat) -> {auto ok : NotBothZero a b} -> Subset Nat (\f => GCD f a b)
 gcd Z Z impossible
 gcd Z b =
-  (b ** MkGCD (CommonFactorExists b (anythingFactorZero b) reflexive) $
-              \q, (CommonFactorExists q _ prf) => prf)
+  Element b $ MkGCD (CommonFactorExists b (anythingFactorZero b) reflexive) $
+                    \q, (CommonFactorExists q _ prf) => prf
 gcd a Z =
-  (a ** MkGCD (CommonFactorExists a reflexive (anythingFactorZero a)) $
-              \q, (CommonFactorExists q prf _) => prf)
+  Element a $ MkGCD (CommonFactorExists a reflexive (anythingFactorZero a)) $
+                    \q, (CommonFactorExists q prf _) => prf
 gcd (S a) (S b) with (cmp (S a) (S b))
     gcd (S (b + S d)) (S b) | CmpGT d =
         sizeInd gcd_step $
@@ -420,18 +438,17 @@ gcd (S a) (S b) with (cmp (S a) (S b))
               LTESucc . lteSuccRight $ lteAddRight b
 
     gcd (S a) (S a)         | CmpEQ =
-        (S a ** MkGCD (selfIsCommonFactor (S a))
-                      (\q, (CommonFactorExists q qfa _) => qfa))
+        Element (S a) $ MkGCD (selfIsCommonFactor (S a))
+                        (\q, (CommonFactorExists q qfa _) => qfa)
 
     gcd (S a) (S (a + S d)) | CmpLT d =
-        let (f ** MkGCD prf greatest) =
+        let (Element f gcdPrf) =
               sizeInd gcd_step $
                 SearchArgs (S (a + S d)) (S a) $
                   rewrite sym $ plusSuccRightSucc a d in
                     LTESucc . lteSuccRight $ lteAddRight a
         in
-        (f ** MkGCD (symmetric prf)
-                    (\q, cf => greatest q $ symmetric cf))
+        Element f (symmetric gcdPrf)
 
 ||| For every two natural numbers there is a unique greatest common divisor.
 export
